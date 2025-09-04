@@ -1,0 +1,24 @@
+{
+  "name": "nodejs",
+  "version": "1.0.0",
+  "description": "mencoba",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NadhifahAfiyah/Belajar_NodeJs.git"
+  },
+  "author": "Nadhifah Afiyah",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NadhifahAfiyah/Belajar_NodeJs/issues"
+  },
+  "homepage": "https://github.com/NadhifahAfiyah/Belajar_NodeJs#readme",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "nodemon": "^3.1.10"
+  }
+}
