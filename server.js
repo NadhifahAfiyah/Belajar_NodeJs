@@ -1,7 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const db = require('./database.js');
+const { dbMovies, dbDirectors} = require('./database.js');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const authenticateToken  = require('./middleware/authMiddleware.js');
+const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
 const port = process.env.PORT || 3100;
 app.use(cors());
@@ -19,11 +23,11 @@ app.use(express.json());
 //console.log(movies);
 
 // dummy data directors
-let directors = [
-    { id: 1, name: 'Peter Jackson', birthYear: 1967 },
-    { id: 2, name: 'Anthony Russo', birthYear: 1988},
-    { id: 3, name: 'Sam Raimi', birthYear: 1975 },
-];
+// let directors = [
+//     { id: 1, name: 'Peter Jackson', birthYear: 1967 },
+//     { id: 2, name: 'Anthony Russo', birthYear: 1988 },
+//     { id: 3, name: 'Sam Raimi', birthYear: 1975 },
+// ];
 //console.log(directors);
 
 /*
@@ -39,90 +43,153 @@ app.get('/status', (request, response) => {
     });
 });
 
-app.get('/movies', (request, response) => {
-    const sql = 'SELECT * FROM movies';
-    db.all(sql, [], (err, rows) => {
+app.post('/auth/register', (request, response) => {
+    const { username, password } = request.body;
+    if (!username || !password || password.length < 6) {
+        return response.status(400).json({ error: 'username dan password (min 6 char) harus diisi' });
+    }
+
+    bcrypt.hash(password, 10, (err, hashedPassword) => {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            console.error("Error hashing:", err);
+            return response.status(500).json({ error: 'Gagal memproses pendaftaran'});
         }
-        response.json({
-            'message': 'success',
-            'data': rows
+
+        const sql = 'INSERT INTO users (username, password) VALUES (?, ?)';
+        const params = [username.toLowerCase(), hashedPassword];
+
+        dbMovies.run(sql, params, function (err) {
+            if (err) {
+                if (err.message.includes('UNIQUE constraint')) {
+                    return response.status(409).json({ error: 'Username sudah digunakan'});
+                }
+                console.error("Error inserting user:", err);
+                return response.status(500).json({ error: 'Gagal menyimpan pengguna'});
+            }
+            response.status(201).json({ message: 'Registerasi berhasil', userId: this.lastID});
         });
+    });
+
+});
+
+app.post('/auth/login', (request, response) => {
+    const { username, password } = request.body;
+
+    // Validasi input kosong
+    if (!username || !password) {
+        return response.status(400).json({ error: 'Username dan password harus diisi' });
+    }
+
+    // Cari user berdasarkan username
+    const sql = 'SELECT * FROM users WHERE username = ?';
+    dbMovies.get(sql, [username.toLowerCase()], (err, user) => {
+        if (err) {
+            console.error("Database error saat login:", err.message);
+            return response.status(500).json({ error: 'Terjadi kesalahan pada server' });
+        }
+
+        // Jika user tidak ditemukan
+        if (!user) {
+            return response.status(401).json({ error: 'Kredensial tidak valid (user tidak ditemukan)' });
+        }
+
+        // Bandingkan password yang dimasukkan dengan yang di-hash di database
+        bcrypt.compare(password, user.password, (err, isMatch) => {
+            if (err) {
+                console.error("Error membandingkan password:", err.message);
+                return response.status(500).json({ error: 'Kesalahan verifikasi password' });
+            }
+
+            if (!isMatch) {
+                return response.status(401).json({ error: 'Kredensial tidak valid (password salah)' });
+            }
+
+            // Buat token JWT
+            const payload = { user: { id: user.id, username: user.username } };
+            jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
+                if (err) {
+                    console.error("Error signing token:", err.message);
+                    return response.status(500).json({ error: 'Gagal membuat token' });
+                }
+
+                // Kirimkan token ke client
+                response.json({
+                    message: 'Login berhasil',
+                    token: token,
+                    user: { id: user.id, username: user.username }
+                });
+            });
+        });
+    });
+});
+
+
+app.get('/movies', (request, response) => {
+    const sql = 'SELECT * FROM movies  ORDER BY id ASC';
+    dbMovies.all(sql, [], (err, rows) => {
+        if (err) {
+            return response.status(400).json({ "error": err.message });
+        }
+        response.json(rows);
     });
 });
 
 app.get('/movies/:id', (request, response) => {
     const sql = 'SELECT * FROM movies WHERE id = ?';
-    db.get(sql, [request.params.id], (err, row) => {
+    dbMovies.get(sql, [request.params.id], (err, row) => {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        if (!row) {
+        if (row) {
+            response.json(row);
+        } else {
             response.status(404).json({ "error": "Movie not found" });
-            return;
         }
-        response.json({
-            'message': 'success',
-            'data': row
-        });
     });
 });
 
 
-app.post('/movies', (request, response) => {
+app.post('/movies', authenticateToken, (request, response) => {
     const { title, director, year } = request.body;
     if (!title || !director || !year) {
         return response.status(400).json({ error: 'title, director, year wajib diisi' });
     }
 
     const sql = 'INSERT INTO movies (title, director, year) VALUES (?,?,?)';
-    db.run(sql, [title, director, year], function(err) {
+    dbMovies.run(sql, [title, director, year], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
+
         }
-        response.status(201).json({
-            'message': 'success',
-            'data': { id: this.lastID, title, director, year }
-        });
+        response.status(201).json({ id: this.lastID, title, director, year});
     });
 });
 
-app.put('/movies/:id', (request, response) => {
+
+app.put('/movies/:id', authenticateToken, (request, response) => {
     const id = parseInt(request.params.id);
-    const { title, director, year } = request.body;  
+    const { title, director, year } = request.body;
     if (!title || !director || !year) {
         return response.status(400).json({ error: 'title, director, year wajib diisi' });
     }
 
     const sql = 'UPDATE movies SET title = ?, director = ?, year = ? WHERE id = ?';
-    db.run(sql, [title, director, year, id], function(err) {
+    dbMovies.run(sql, [title, director, year, id], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        response.json({
-            'message': 'success',
-            'data': { id, title, director, year }
-        });
+        response.json({ id, title, director, year });
     });
 });
 
-app.delete('/movies/:id', (request, response) => {
+app.delete('/movies/:id', authenticateToken, (request, response) => {
     const id = parseInt(request.params.id);
     const sql = 'DELETE FROM movies WHERE id = ?';
-    db.run(sql, [id], function(err) {
+    dbMovies.run(sql, [id], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        response.json({
-            'message': 'success',
-            'data': { id }
-        });
+        response.status(204).send();
     });
 });
 
@@ -130,87 +197,67 @@ app.delete('/movies/:id', (request, response) => {
 // direktors
 app.get('/directors', (request, response) => {
     const sql = 'SELECT * FROM directors';
-    db.all(sql, [], (err, rows) => {
-        if (err) { 
-            response.status(400).json({ "error": err.message });
-            return;
-        }
-        response.json({
-            'message': 'success',
-            'data': rows
-        });
-    });
-});
-
-app.get('/directors/:id', (request, response) => {  
-    const sql = 'SELECT * FROM directors WHERE id = ?';
-    db.get(sql, [request.params.id], (err, row) => {
+    dbDirectors.all(sql, [], (err, rows) => {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        if (!row) {
-            response.status(404).json({ "error": "Director not found" });
-            return;
-        }       
-        response.json({
-            'message': 'success',
-            'data': row
-        });
+        response.json(rows);
     });
 });
 
-app.post('/directors', (request, response) => {
+app.get('/directors/:id', (request, response) => {
+    const sql = 'SELECT * FROM directors WHERE id = ?';
+    dbDirectors.get(sql, [request.params.id], (err, row) => {
+        if (err) {
+            return response.status(400).json({ "error": err.message });
+        }
+        if (row) {
+            response.json(row);
+        } else {
+            response.status(404).json({ "error": "Director not found" });
+        }
+    });
+});
+
+app.post('/directors', authenticateToken, (request, response) => {
     const { name, birthYear } = request.body;
     if (!name || !birthYear) {
         return response.status(400).json({ error: 'name, birthYear wajib diisi' });
     }
     const sql = 'INSERT INTO directors (name, birth_year) VALUES (?,?)';
-    db.run(sql, [name, birthYear], function(err) {
+    dbDirectors.run(sql, [name, birthYear], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        response.status(201).json({
-            'message': 'success',
-            'data': { id: this.lastID, name, birthYear }
-        });
+        response.status(201).json({ id: this.lastID, name, birthYear });
     });
 });
 
-app.put('/directors/:id', (request, response) => {
-    const id = parseInt(request.params.id);   
-    const { name, birthYear } = request.body;  
+app.put('/directors/:id', authenticateToken, (request, response) => {
+    const id = parseInt(request.params.id);
+    const { name, birthYear } = request.body;
     if (!name || !birthYear) {
         return response.status(400).json({ error: 'name, birthYear wajib diisi' });
     }
     const sql = 'UPDATE directors SET name = ?, birth_year = ? WHERE id = ?';
-    db.run(sql, [name, birthYear, id], function(err) {
+    dbDirectors.run(sql, [name, birthYear, id], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
-        }   
-        response.json({
-            'message': 'success',
-            'data': { id, name, birthYear }
-        });
+            return response.status(400).json({ "error": err.message });
+        }
+        response.json({ id, name, birthYear });
     });
 });
 
-app.delete('/directors/:id', (request, response) => {   
+app.delete('/directors/:id', authenticateToken, (request, response) => {
     const id = parseInt(request.params.id);
-    const sql = 'DELETE FROM directors WHERE id = ?';       
-    db.run(sql, [id], function(err) {
+    const sql = 'DELETE FROM directors WHERE id = ?';
+    dbDirectors.run(sql, [id], function (err) {
         if (err) {
-            response.status(400).json({ "error": err.message });
-            return;
+            return response.status(400).json({ "error": err.message });
         }
-        response.json({
-            'message': 'success',
-            'data': { id }
-        });
+        response.status(204).send();
     });
-}); 
+});
 
 //handle 404
 app.use((request, response) => {
