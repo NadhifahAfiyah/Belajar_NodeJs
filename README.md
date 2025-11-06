@@ -3,7 +3,7 @@
 ### Kelas : 2D TRPL
 
 ## Tujuan Tugas
-*mengimplementasikan middleware autentikasi pada serangkaian endpoint baru*
+*mengimplementasikan middleware autentikasi pada serangkaian endpoint baru,*
 *memperkuat pemahaman tentang alur kerja autentikasi berbasis token*
 
 ## Skenario
