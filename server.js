@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const db = require('./db.js'); // menggunakan modul pg baru
-const bcrypt = require('bcrypt.js');
+const bcrypt = require("bcrypt");
 const jwt = require('jsonwebtoken');
 const {authenticateToken, authorizeRole} = require('./middleware/auth.js');
 
