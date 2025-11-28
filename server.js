@@ -15,12 +15,12 @@ app.use(cors());
 app.use(express.json());
 
 // === ROUTES ===
-app.get('status', (request, response) => {
-    response.json({ok: true, service:'film-api'});l
+app.get('/status', (request, response) => {
+    response.json({ ok: true, service:'film-api' });
 });
 
 // === AUTH ROUTES (Refactored for pg) ===
-app.post('auth/register', async (request, response, next) => {
+app.post('/auth/register', async (request, response, next) => {
     const {username, password} = request.body;
     if (!username || !password || password.length < 6) {
         return response.status(400).json({error: 'Username dan password (min 6 char) harus diisi'});
@@ -39,7 +39,7 @@ app.post('auth/register', async (request, response, next) => {
     }
 });
 
-app.post('auth/register-admin', async (request, response, next) => {
+app.post('/auth/register-admin', async (request, response, next) => {
     const {username, password} = request.body;
     if (!username || !password || password.length < 6) {
         return response.status(400).json({error: 'Username dan password (min 6 char) harus diisi'});
@@ -58,7 +58,7 @@ app.post('auth/register-admin', async (request, response, next) => {
     }
 });
 
-app.post('auth/login', async (request, response, next) => {
+app.post('/auth/login', async (request, response, next) => {
     const {username, password} = request.body;
     try {
         const sql = 'SELECT * FROM users WHERE username = $1';
@@ -130,7 +130,7 @@ app.put('/movies/:id', authenticateToken, authorizeRole('admin'), async (request
     }
 });
 
-app.delete('movies/:id', authenticateToken, authorizeRole('admin'), async (request, response, next) => {
+app.delete('/movies/:id', authenticateToken, authorizeRole('admin'), async (request, response, next) => {
     const sql = 'DELETE FROM movies WHERE id = $1 RETURNING *';
     try {
         const result = await db.query(sql, [request.params.id]);
@@ -144,7 +144,85 @@ app.delete('movies/:id', authenticateToken, authorizeRole('admin'), async (reque
 });
 
 // DIRECTOR ROUTES (TUGAS PRAKTIKUM) ===
-// MAHASISWA HARUS ME-REFACTOR ENDPOINT /DIRECTORS DENGAN POLA YANG SAMA
+// === DIRECTOR ROUTES ===
+app.get('/directors', async (request, response, next) => {
+    try {
+        const sql = 'SELECT * FROM directors ORDER BY id ASC';
+        const result = await db.query(sql);
+        response.json(result.rows);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.get('/directors/:id', async (request, response, next) => {
+    try {
+        const sql = 'SELECT * FROM directors WHERE id = $1';
+        const result = await db.query(sql, [request.params.id]);
+
+        if (result.rows.length === 0) {
+            return response.status(404).json({ error: 'Director tidak ditemukan' });
+        }
+
+        response.json(result.rows[0]);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.post('/directors', authenticateToken, authorizeRole('admin'), async (request, response, next) => {
+    const { name, birthYear } = request.body;
+
+    if (!name) {
+        return response.status(400).json({ error: 'Nama director wajib diisi' });
+    }
+
+    try {
+        const sql = `INSERT INTO directors (name, "birthYear")
+                     VALUES ($1, $2)
+                     RETURNING *`;
+        const result = await db.query(sql, [name, birthYear]);
+        response.status(201).json(result.rows[0]);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.put('/directors/:id', authenticateToken, authorizeRole('admin'), async (request, response, next) => {
+    const { name, birthYear } = request.body;
+
+    try {
+        const sql = `
+            UPDATE directors 
+            SET name = $1, "birthYear" = $2
+            WHERE id = $3
+            RETURNING *`;
+        const result = await db.query(sql, [name, birthYear, request.params.id]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Director tidak ditemukan' });
+        }
+
+        response.json(result.rows[0]);
+    } catch (err) {
+        next(err);
+    }
+});
+
+app.delete('/directors/:id', authenticateToken, authorizeRole('admin'), async (request, response, next) => {
+    try {
+        const sql = 'DELETE FROM directors WHERE id = $1 RETURNING *';
+        const result = await db.query(sql, [request.params.id]);
+
+        if (result.rowCount === 0) {
+            return response.status(404).json({ error: 'Director tidak ditemukan' });
+        }
+
+        response.status(204).send();
+    } catch (err) {
+        next(err);
+    }
+});
 
 // === FALLBACK & ERROR HANDLING ===
 app.use ((request, response) => {
